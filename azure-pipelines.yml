@@ -26,5 +26,5 @@ stages:
                 python Hello_Hexaware.py
           - task: PublishBuildArtifacts@1
             inputs: 
-              PathtoPublish: '$ (Build.ArtifactStagingDirectory)'
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
               ArtifactName: 'HelloApp_Drop_$(Build.BuildNumber)'
