@@ -24,3 +24,7 @@ stages:
               script: |
                 python -m pip install --upgrade pip
                 python Hello_Hexaware.py
+          - task: PublishBuildArtifacts@1
+            inputs: 
+              PathtoPublish: '$ (Build.ArtifactStagingDirectory)'
+              ArtifactName: 'HelloApp_Drop_$(Build.BuildNumber)'
