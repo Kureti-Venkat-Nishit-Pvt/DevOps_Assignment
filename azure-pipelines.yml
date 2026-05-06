@@ -32,7 +32,6 @@ stages:
               script: |
                 mkdir -p $(Build.ArtifactStagingDirectory)
                 cp Hello_Hexaware.py $(Build.ArtifactStagingDirectory)
-                displayName: 'Copy the Files to Artifact Diretory'
 
           - task: PublishBuildArtifacts@1
             inputs: 
