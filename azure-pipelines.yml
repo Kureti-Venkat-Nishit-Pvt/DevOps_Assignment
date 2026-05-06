@@ -4,17 +4,23 @@
 # GitHub Repository Link: https://github.com/Kureti-Venkat-Nishit-Pvt/DevOps_Assignment/blob/main/Hello_Hexaware.py 
 
 trigger:
-- main
-
-pool:
-  vmImage: ubuntu-latest
-
-steps:
-- task: UsePythonVersion@0
-  inputs:
-      versionSpec: '3.x'
-
-- script: |
-    python -m pip install --upgrade pip
-    python Hello_Hexaware.py
-  displayName: 'Run Hello_Hexaware Sample Application in GitHub using Azure DevOps'
+  branches:
+    include:
+      - main
+stages:
+  - stage: __default
+    jobs:
+      - job: Print_Hello_Hexaware
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: UsePythonVersion@0
+            displayName: 'Install Latest Python Version in Linux'
+            inputs:
+              versionSpec: '3.x'
+          - task: CmdLine@2
+            displayName: 'Run the Sample Application in GitHub using Azure DevOps'
+            inputs:
+              script: |
+                python -m pip install --upgrade pip
+                python Hello_Hexaware.py
