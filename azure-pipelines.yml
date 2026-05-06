@@ -18,12 +18,22 @@ stages:
             displayName: 'Install Latest Python Version in Linux'
             inputs:
               versionSpec: '3.x'
+
           - task: CmdLine@2
             displayName: 'Run the Sample Application in GitHub using Azure DevOps'
             inputs:
               script: |
                 python -m pip install --upgrade pip
                 python Hello_Hexaware.py
+
+          - task: CmdLine@2
+            displayName: 'Create New Artifact Staging Directory'
+            inputs:
+              script: |
+                mkdir -p $(Build.ArtifactStagingDirectory)
+                cp Hello_Hexaware.py $(Build.ArtifactStagingDirectory)
+                displayName: 'Copy the Files to Artifact Diretory'
+
           - task: PublishBuildArtifacts@1
             inputs: 
               PathtoPublish: '$(Build.ArtifactStagingDirectory)'
