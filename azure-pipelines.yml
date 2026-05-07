@@ -1,0 +1,61 @@
+trigger:
+- Calculator
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  terraformVersion: '1.5.7'
+
+stages:
+
+- stage: Terraform
+  jobs:
+
+  - job: DeployInfra
+
+    steps:
+
+    - checkout: self
+
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: $(terraformVersion)
+
+    - task: TerraformTaskV4@4
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: 'terraform'
+        backendServiceArm: 'AzureSPN'
+
+    - task: TerraformTaskV4@4
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        workingDirectory: 'terraform'
+        environmentServiceNameAzureRM: 'AzureSPN'
+        commandOptions: '-auto-approve'
+
+- stage: DeployApplication
+  dependsOn: Terraform
+
+  jobs:
+
+  - job: DeployWebApp
+
+    steps:
+
+    - task: ArchiveFiles@2
+      inputs:
+        rootFolderOrFile: 'app'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
+
+    - task: AzureWebApp@1
+      inputs:
+        azureSubscription: 'AzureSPN'
+        appType: 'webAppLinux'
+        appName: 'webcalinddev02'
+        package: '$(Build.ArtifactStagingDirectory)/app.zip'

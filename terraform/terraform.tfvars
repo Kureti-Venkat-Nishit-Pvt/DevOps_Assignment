@@ -1,0 +1,5 @@
+subscription_id = "47e11824-86bc-41f8-9dbd-2816b994a6a2"
+location = "South India"
+resource_group_name = "RG_cal_ind_dev_02"
+app_service_plan_name = "ASP_cal_ind_dev_02"
+web_app_name = "webcalinddev02"
