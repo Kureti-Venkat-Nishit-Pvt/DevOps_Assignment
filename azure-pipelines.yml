@@ -10,32 +10,48 @@ variables:
 stages:
 
 # =========================================================
-# TERRAFORM STAGE
+# TERRAFORM + APPLICATION DEPLOYMENT STAGE
 # =========================================================
 
-- stage: Terraform
+- stage: Deploy
+
+  displayName: Deploy Infrastructure And Application
 
   jobs:
 
-  - job: DeployInfra
+  - job: TerraformAndDeploy
 
-    displayName: Deploy Azure Infrastructure
+    displayName: Terraform And WebApp Deployment
 
     pool:
       vmImage: ubuntu-latest
 
     steps:
 
+    # =====================================================
+    # CHECKOUT CODE
+    # =====================================================
+
     - checkout: self
 
+    # =====================================================
+    # INSTALL TERRAFORM
+    # =====================================================
+
     - task: TerraformInstaller@1
+
       displayName: Install Terraform
 
       inputs:
         terraformVersion: '1.5.7'
 
+    # =====================================================
+    # TERRAFORM INIT
+    # =====================================================
+
     - task: AzureCLI@2
-      displayName: Terraform Init Plan Apply
+
+      displayName: Terraform Init
 
       inputs:
         azureSubscription: 'AzureSPN'
@@ -48,32 +64,99 @@ stages:
 
           terraform init
 
+    # =====================================================
+    # TERRAFORM VALIDATE
+    # =====================================================
+
+    - task: AzureCLI@2
+
+      displayName: Terraform Validate
+
+      inputs:
+        azureSubscription: 'AzureSPN'
+        scriptType: bash
+        scriptLocation: inlineScript
+
+        inlineScript: |
+
+          cd terraform
+
           terraform validate
+
+    # =====================================================
+    # CHECK AND IMPORT EXISTING RESOURCE GROUP
+    # =====================================================
+
+    - task: AzureCLI@2
+
+      displayName: Check Existing Resource Group
+
+      inputs:
+        azureSubscription: 'AzureSPN'
+        scriptType: bash
+        scriptLocation: inlineScript
+
+        inlineScript: |
+
+          cd terraform
+
+          echo "Checking if Resource Group exists..."
+
+          if az group exists --name RG_cal_ind_dev_02; then
+
+            echo "Resource Group exists. Importing into Terraform state..."
+
+            terraform init
+
+            terraform import azurerm_resource_group.rg /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_02 || true
+
+          else
+
+            echo "Resource Group does not exist. Terraform will create it."
+
+          fi
+
+    # =====================================================
+    # TERRAFORM PLAN
+    # =====================================================
+
+    - task: AzureCLI@2
+
+      displayName: Terraform Plan
+
+      inputs:
+        azureSubscription: 'AzureSPN'
+        scriptType: bash
+        scriptLocation: inlineScript
+
+        inlineScript: |
+
+          cd terraform
 
           terraform plan
 
+    # =====================================================
+    # TERRAFORM APPLY
+    # =====================================================
+
+    - task: AzureCLI@2
+
+      displayName: Terraform Apply
+
+      inputs:
+        azureSubscription: 'AzureSPN'
+        scriptType: bash
+        scriptLocation: inlineScript
+
+        inlineScript: |
+
+          cd terraform
+
           terraform apply -auto-approve
 
-# =========================================================
-# APPLICATION DEPLOYMENT STAGE
-# =========================================================
-
-- stage: DeployApplication
-
-  dependsOn: Terraform
-
-  jobs:
-
-  - job: DeployWebApp
-
-    displayName: Deploy Calculator Application
-
-    pool:
-      vmImage: ubuntu-latest
-
-    steps:
-
-    - checkout: self
+    # =====================================================
+    # ARCHIVE APPLICATION FILES
+    # =====================================================
 
     - task: ArchiveFiles@2
 
@@ -85,6 +168,10 @@ stages:
         archiveType: zip
         archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
         replaceExistingArchive: true
+
+    # =====================================================
+    # DEPLOY APPLICATION TO AZURE WEB APP
+    # =====================================================
 
     - task: AzureWebApp@1
 
