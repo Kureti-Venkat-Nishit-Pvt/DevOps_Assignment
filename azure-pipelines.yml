@@ -75,10 +75,6 @@ stages:
 
     - checkout: self
 
-    # =====================================================
-    # CREATE ZIP PACKAGE
-    # =====================================================
-
     - task: ArchiveFiles@2
 
       displayName: Archive Application Files
@@ -89,10 +85,6 @@ stages:
         archiveType: zip
         archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
         replaceExistingArchive: true
-
-    # =====================================================
-    # DEPLOY TO AZURE WEB APP
-    # =====================================================
 
     - task: AzureWebApp@1
 
