@@ -163,7 +163,7 @@ stages:
       displayName: Archive Application Files
 
       inputs:
-        rootFolderOrFile: '.'
+        rootFolderOrFile: '$(Build.SourcesDirectory)'
         includeRootFolder: false
         archiveType: zip
         archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'

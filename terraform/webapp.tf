@@ -18,4 +18,6 @@ resource "azurerm_linux_web_app" "webapp" {
     SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
     WEBSITES_PORT                  = "8000"
   }
+
+  https_only = true
 }
