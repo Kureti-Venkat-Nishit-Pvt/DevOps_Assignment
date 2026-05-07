@@ -9,51 +9,95 @@ variables:
 
 stages:
 
+# =========================================================
+# TERRAFORM STAGE
+# =========================================================
+
 - stage: Terraform
+
   jobs:
 
   - job: DeployInfra
+
+    displayName: Deploy Azure Infrastructure
+
+    pool:
+      vmImage: ubuntu-latest
 
     steps:
 
     - checkout: self
 
     - task: TerraformInstaller@1
-      inputs:
-        terraformVersion: $(terraformVersion)
+      displayName: Install Terraform
 
-    - task: TerraformTaskV4@4
       inputs:
-        provider: 'azurerm'
-        command: 'init'
-        workingDirectory: 'terraform'
-        backendServiceArm: 'AzureSPN'
+        terraformVersion: '1.5.7'
 
-    - task: TerraformTaskV4@4
+    - task: AzureCLI@2
+      displayName: Terraform Init Plan Apply
+
       inputs:
-        provider: 'azurerm'
-        command: 'apply'
-        workingDirectory: 'terraform'
-        environmentServiceNameAzureRM: 'AzureSPN'
-        commandOptions: '-auto-approve'
+        azureSubscription: 'AzureSPN'
+        scriptType: bash
+        scriptLocation: inlineScript
+
+        inlineScript: |
+
+          cd terraform
+
+          terraform init
+
+          terraform validate
+
+          terraform plan
+
+          terraform apply -auto-approve
+
+# =========================================================
+# APPLICATION DEPLOYMENT STAGE
+# =========================================================
 
 - stage: DeployApplication
+
   dependsOn: Terraform
 
   jobs:
 
   - job: DeployWebApp
 
+    displayName: Deploy Calculator Application
+
+    pool:
+      vmImage: ubuntu-latest
+
     steps:
 
+    - checkout: self
+
+    # =====================================================
+    # CREATE ZIP PACKAGE
+    # =====================================================
+
     - task: ArchiveFiles@2
+
+      displayName: Archive Application Files
+
       inputs:
-        rootFolderOrFile: 'app'
+        rootFolderOrFile: '.'
         includeRootFolder: false
         archiveType: zip
         archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
+        replaceExistingArchive: true
+
+    # =====================================================
+    # DEPLOY TO AZURE WEB APP
+    # =====================================================
 
     - task: AzureWebApp@1
+
+      displayName: Deploy To Azure Web App
+
       inputs:
         azureSubscription: 'AzureSPN'
         appType: 'webAppLinux'

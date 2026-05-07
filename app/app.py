@@ -1,10 +1,12 @@
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 import os
 
+PORT = int(os.environ.get("PORT", 8000))
+
 os.chdir("app")
 
-server = HTTPServer(("0.0.0.0", 8000), SimpleHTTPRequestHandler)
+server = HTTPServer(("0.0.0.0", PORT), SimpleHTTPRequestHandler)
 
-print("Server running on port 8000")
+print(f"Server running on port {PORT}")
 
 server.serve_forever()
