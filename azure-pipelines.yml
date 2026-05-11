@@ -102,13 +102,13 @@ stages:
 
           echo "Checking if Resource Group exists..."
 
-          if az group exists --name RG_cal_ind_dev_02; then
+          if az group exists --name RG_cal_ind_dev_01; then
 
             echo "Resource Group exists. Importing into Terraform state..."
 
             terraform init
 
-            terraform import azurerm_resource_group.rg /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_02 || true
+            terraform import azurerm_resource_group.rg /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_01 || true
 
           else
 
@@ -180,5 +180,5 @@ stages:
       inputs:
         azureSubscription: 'AzureSPN'
         appType: 'webAppLinux'
-        appName: 'webcalinddev02'
+        appName: 'webcalinddev01'
         package: '$(Build.ArtifactStagingDirectory)/app.zip'
