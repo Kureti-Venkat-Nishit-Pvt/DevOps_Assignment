@@ -13,15 +13,15 @@ stages:
 # TERRAFORM + APPLICATION DEPLOYMENT STAGE
 # =========================================================
 
-- stage: Deploy
+- stage: CreateResources
 
-  displayName: Deploy Infrastructure And Application
+  displayName: TF Resource Creation
 
   jobs:
 
-  - job: TerraformAndDeploy
+  - job: TFResourceCreation
 
-    displayName: Terraform And WebApp Deployment
+    displayName: TF_Resource_Creation
 
     pool:
       vmImage: ubuntu-latest
