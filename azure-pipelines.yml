@@ -61,6 +61,7 @@ stages:
         inlineScript: |
 
           cd terraform
+
           terraform init
 
     # =====================================================
@@ -79,15 +80,16 @@ stages:
         inlineScript: |
 
           cd terraform
+
           terraform validate
 
     # =====================================================
-    # CHECK EXISTING RESOURCE GROUP
+    # CHECK & IMPORT EXISTING RESOURCES
     # =====================================================
 
     - task: AzureCLI@2
 
-      displayName: Check Existing Resource Group
+      displayName: Check And Import Existing Resources
 
       inputs:
         azureSubscription: 'AzureSPN'
@@ -98,21 +100,80 @@ stages:
 
           cd terraform
 
-          echo "Checking if Resource Group exists..."
+          echo "Initializing Terraform..."
+
+          terraform init
+
+          # ===============================================
+          # RESOURCE GROUP
+          # ===============================================
+
+          echo "Checking Resource Group..."
 
           if az group exists --name RG_cal_ind_dev_01; then
 
-            echo "Resource Group exists. Importing into Terraform state..."
+            echo "Resource Group exists. Importing..."
 
-            terraform init
-
-            terraform import azurerm_resource_group.rg /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_01 || true
+            terraform import azurerm_resource_group.rg \
+            /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_01 || true
 
           else
 
-            echo "Resource Group does not exist. Terraform will create it."
+            echo "Resource Group does not exist."
 
           fi
+
+          # ===============================================
+          # APP SERVICE PLAN
+          # ===============================================
+
+          echo "Checking App Service Plan..."
+
+          ASP_EXISTS=$(az appservice plan show \
+          --name ASP_cal_ind_dev_01 \
+          --resource-group RG_cal_ind_dev_01 \
+          --query "name" \
+          -o tsv 2>/dev/null || echo "")
+
+          if [ ! -z "$ASP_EXISTS" ]; then
+
+            echo "App Service Plan exists. Importing..."
+
+            terraform import azurerm_service_plan.asp \
+            /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_01/providers/Microsoft.Web/serverFarms/ASP_cal_ind_dev_01 || true
+
+          else
+
+            echo "App Service Plan does not exist."
+
+          fi
+
+          # ===============================================
+          # WEB APP
+          # ===============================================
+
+          echo "Checking Web App..."
+
+          WEBAPP_EXISTS=$(az webapp show \
+          --name webcalinddev01 \
+          --resource-group RG_cal_ind_dev_01 \
+          --query "name" \
+          -o tsv 2>/dev/null || echo "")
+
+          if [ ! -z "$WEBAPP_EXISTS" ]; then
+
+            echo "Web App exists. Importing..."
+
+            terraform import azurerm_linux_web_app.webapp \
+            /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_01/providers/Microsoft.Web/sites/webcalinddev01 || true
+
+          else
+
+            echo "Web App does not exist."
+
+          fi
+
+          echo "Import process completed."
 
     # =====================================================
     # TERRAFORM PLAN
@@ -130,6 +191,7 @@ stages:
         inlineScript: |
 
           cd terraform
+
           terraform plan
 
     # =====================================================
@@ -148,6 +210,7 @@ stages:
         inlineScript: |
 
           cd terraform
+
           terraform apply -auto-approve
 
 # =========================================================
