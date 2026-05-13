@@ -10,18 +10,18 @@ variables:
 stages:
 
 # =========================================================
-# TERRAFORM + APPLICATION DEPLOYMENT STAGE
+# STAGE 1 - CREATE AZURE RESOURCES
 # =========================================================
 
 - stage: CreateResources
 
-  displayName: TF Resource Creation
+  displayName: Create Azure Resources
 
   jobs:
 
-  - job: TFResourceCreation
+  - job: TerraformDeployment
 
-    displayName: TF_Resource_Creation
+    displayName: Terraform_Deployment
 
     pool:
       vmImage: ubuntu-latest
@@ -61,7 +61,6 @@ stages:
         inlineScript: |
 
           cd terraform
-
           terraform init
 
     # =====================================================
@@ -80,11 +79,10 @@ stages:
         inlineScript: |
 
           cd terraform
-
           terraform validate
 
     # =====================================================
-    # CHECK AND IMPORT EXISTING RESOURCE GROUP
+    # CHECK EXISTING RESOURCE GROUP
     # =====================================================
 
     - task: AzureCLI@2
@@ -132,7 +130,6 @@ stages:
         inlineScript: |
 
           cd terraform
-
           terraform plan
 
     # =====================================================
@@ -151,8 +148,36 @@ stages:
         inlineScript: |
 
           cd terraform
-
           terraform apply -auto-approve
+
+# =========================================================
+# STAGE 2 - ARCHIVE & PUBLISH ARTIFACT
+# =========================================================
+
+- stage: BuildArtifact
+
+  displayName: Archive and Publish Artifact
+
+  dependsOn: CreateResources
+
+  condition: succeeded()
+
+  jobs:
+
+  - job: BuildAndPublish
+
+    displayName: Build_And_Publish
+
+    pool:
+      vmImage: ubuntu-latest
+
+    steps:
+
+    # =====================================================
+    # CHECKOUT CODE
+    # =====================================================
+
+    - checkout: self
 
     # =====================================================
     # ARCHIVE APPLICATION FILES
@@ -170,7 +195,57 @@ stages:
         replaceExistingArchive: true
 
     # =====================================================
-    # DEPLOY APPLICATION TO AZURE WEB APP
+    # PUBLISH BUILD ARTIFACT
+    # =====================================================
+
+    - task: PublishBuildArtifacts@1
+
+      displayName: Publish Application Artifact
+
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/app.zip'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
+
+# =========================================================
+# STAGE 3 - DEPLOY WEB APPLICATION
+# =========================================================
+
+- stage: DeployWebApp
+
+  displayName: Deploy Web Application
+
+  dependsOn: BuildArtifact
+
+  condition: succeeded()
+
+  jobs:
+
+  - job: DeployApplication
+
+    displayName: Deploy_Application
+
+    pool:
+      vmImage: ubuntu-latest
+
+    steps:
+
+    # =====================================================
+    # DOWNLOAD BUILD ARTIFACT
+    # =====================================================
+
+    - task: DownloadBuildArtifacts@0
+
+      displayName: Download Application Artifact
+
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'drop'
+        downloadPath: '$(Pipeline.Workspace)'
+
+    # =====================================================
+    # DEPLOY TO AZURE WEB APP
     # =====================================================
 
     - task: AzureWebApp@1
@@ -181,4 +256,4 @@ stages:
         azureSubscription: 'AzureSPN'
         appType: 'webAppLinux'
         appName: 'webcalinddev01'
-        package: '$(Build.ArtifactStagingDirectory)/app.zip'
+        package: '$(Pipeline.Workspace)/drop/app.zip'
