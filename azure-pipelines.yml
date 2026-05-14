@@ -19,6 +19,7 @@ variables:
   azureServiceConnection: 'AzureSPN'
   deployToAks: 'true'
   tfvarsFile: '${{ parameters.environment }}.tfvars'
+  imageRepository: 'dragot-calculator'
 
 stages:
 
@@ -155,13 +156,11 @@ stages:
           WEBAPP_NAME=$(terraform output -raw webapp_name)
           ACR_NAME=$(terraform output -raw acr_name)
           AKS_NAME=$(terraform output -raw aks_cluster_name)
-          IMAGE_REPO=$(terraform output -raw image_repository)
 
           echo "##vso[task.setvariable variable=resourceGroupName]$RG_NAME"
           echo "##vso[task.setvariable variable=webAppName]$WEBAPP_NAME"
           echo "##vso[task.setvariable variable=acrName]$ACR_NAME"
           echo "##vso[task.setvariable variable=aksClusterName]$AKS_NAME"
-          echo "##vso[task.setvariable variable=imageRepository]$IMAGE_REPO"
 
           echo "Terraform outputs loaded successfully."
 
