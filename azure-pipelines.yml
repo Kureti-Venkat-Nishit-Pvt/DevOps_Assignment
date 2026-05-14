@@ -21,7 +21,7 @@ stages:
 
   - job: TerraformDeployment
 
-    displayName: Terraform_Deployment
+    displayName: Terraform Deployment
 
     pool:
       vmImage: ubuntu-latest
@@ -84,98 +84,6 @@ stages:
           terraform validate
 
     # =====================================================
-    # CHECK & IMPORT EXISTING RESOURCES
-    # =====================================================
-
-    - task: AzureCLI@2
-
-      displayName: Check And Import Existing Resources
-
-      inputs:
-        azureSubscription: 'AzureSPN'
-        scriptType: bash
-        scriptLocation: inlineScript
-
-        inlineScript: |
-
-          cd terraform
-
-          echo "Initializing Terraform..."
-
-          terraform init
-
-          # ===============================================
-          # RESOURCE GROUP
-          # ===============================================
-
-          echo "Checking Resource Group..."
-
-          if az group exists --name RG_cal_ind_dev_01; then
-
-            echo "Resource Group exists. Importing..."
-
-            terraform import azurerm_resource_group.rg \
-            /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_01 || true
-
-          else
-
-            echo "Resource Group does not exist."
-
-          fi
-
-          # ===============================================
-          # APP SERVICE PLAN
-          # ===============================================
-
-          echo "Checking App Service Plan..."
-
-          ASP_EXISTS=$(az appservice plan show \
-          --name ASP_cal_ind_dev_01 \
-          --resource-group RG_cal_ind_dev_01 \
-          --query "name" \
-          -o tsv 2>/dev/null || echo "")
-
-          if [ ! -z "$ASP_EXISTS" ]; then
-
-            echo "App Service Plan exists. Importing..."
-
-            terraform import azurerm_service_plan.asp \
-            /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_01/providers/Microsoft.Web/serverFarms/ASP_cal_ind_dev_01 || true
-
-          else
-
-            echo "App Service Plan does not exist."
-
-          fi
-
-          # ===============================================
-          # WEB APP
-          # ===============================================
-
-          echo "Checking Web App..."
-
-          WEBAPP_EXISTS=$(az webapp show \
-          --name webcalinddev01 \
-          --resource-group RG_cal_ind_dev_01 \
-          --query "name" \
-          -o tsv 2>/dev/null || echo "")
-
-          if [ ! -z "$WEBAPP_EXISTS" ]; then
-
-            echo "Web App exists. Importing..."
-
-            terraform import azurerm_linux_web_app.webapp \
-            /subscriptions/47e11824-86bc-41f8-9dbd-2816b994a6a2/resourceGroups/RG_cal_ind_dev_01/providers/Microsoft.Web/sites/webcalinddev01 || true
-
-          else
-
-            echo "Web App does not exist."
-
-          fi
-
-          echo "Import process completed."
-
-    # =====================================================
     # TERRAFORM PLAN
     # =====================================================
 
@@ -192,7 +100,7 @@ stages:
 
           cd terraform
 
-          terraform plan
+          terraform plan -var-file="terraform.tfvars"
 
     # =====================================================
     # TERRAFORM APPLY
@@ -211,39 +119,41 @@ stages:
 
           cd terraform
 
-          terraform apply -auto-approve
+          terraform apply -auto-approve -var-file="terraform.tfvars"
+
+          echo "Getting Terraform Outputs..."
+
+          WEBAPP_NAME=$(terraform output -raw web_app_name)
+
+          echo "##vso[task.setvariable variable=WEBAPP_NAME;isOutput=true]$WEBAPP_NAME"
+
+      name: terraformApplyStep
 
 # =========================================================
-# STAGE 2 - ARCHIVE & PUBLISH ARTIFACT
+# STAGE 2 - BUILD APPLICATION
 # =========================================================
 
 - stage: BuildArtifact
 
-  displayName: Archive and Publish Artifact
+  displayName: Build Application Artifact
 
   dependsOn: CreateResources
-
-  condition: succeeded()
 
   jobs:
 
   - job: BuildAndPublish
 
-    displayName: Build_And_Publish
+    displayName: Archive And Publish Artifact
 
     pool:
       vmImage: ubuntu-latest
 
     steps:
 
-    # =====================================================
-    # CHECKOUT CODE
-    # =====================================================
-
     - checkout: self
 
     # =====================================================
-    # ARCHIVE APPLICATION FILES
+    # ARCHIVE FILES
     # =====================================================
 
     - task: ArchiveFiles@2
@@ -258,12 +168,12 @@ stages:
         replaceExistingArchive: true
 
     # =====================================================
-    # PUBLISH BUILD ARTIFACT
+    # PUBLISH ARTIFACT
     # =====================================================
 
     - task: PublishBuildArtifacts@1
 
-      displayName: Publish Application Artifact
+      displayName: Publish Build Artifact
 
       inputs:
         PathtoPublish: '$(Build.ArtifactStagingDirectory)/app.zip'
@@ -280,21 +190,22 @@ stages:
 
   dependsOn: BuildArtifact
 
-  condition: succeeded()
-
   jobs:
 
   - job: DeployApplication
 
-    displayName: Deploy_Application
+    displayName: Deploy To Azure Web App
 
     pool:
       vmImage: ubuntu-latest
 
+    variables:
+      WEBAPP_NAME: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformApplyStep.WEBAPP_NAME'] ]
+
     steps:
 
     # =====================================================
-    # DOWNLOAD BUILD ARTIFACT
+    # DOWNLOAD ARTIFACT
     # =====================================================
 
     - task: DownloadBuildArtifacts@0
@@ -308,7 +219,7 @@ stages:
         downloadPath: '$(Pipeline.Workspace)'
 
     # =====================================================
-    # DEPLOY TO AZURE WEB APP
+    # DEPLOY WEB APPLICATION
     # =====================================================
 
     - task: AzureWebApp@1
@@ -318,5 +229,5 @@ stages:
       inputs:
         azureSubscription: 'AzureSPN'
         appType: 'webAppLinux'
-        appName: 'webcalinddev01'
+        appName: '$(WEBAPP_NAME)'
         package: '$(Pipeline.Workspace)/drop/app.zip'
