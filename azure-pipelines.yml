@@ -1,3 +1,8 @@
+# =========================================================
+# Azure Pipelines YAML for DRAGOT Calculator Application  |
+# =========================================================
+
+# This pipeline automates the deployment of the DRAGOT Calculator application
 trigger:
 - Mark_6
 
@@ -16,11 +21,21 @@ pool:
 variables:
   terraformVersion: '1.5.7'
   azureServiceConnection: 'AzureSPN'
+
+  # Controls whether AKS deployment stage executes.
   deployToAks: 'true'
+
+  # Dynamically selects:
+  # dev.tfvars OR prod.tfvars
   tfvarsFile: '${{ parameters.environment }}.tfvars'
+
+  # Docker image repository name used for:
+  # - ACR image builds
+  # - WebApp deployments
+  # - AKS Helm deployments
   imageRepository: 'dragot-calculator'
 
-  # Pipeline metadata
+  # Pipeline metadata variables
   envTag: ${{ parameters.environment }}
   buildId: $(Build.BuildId)
 
@@ -37,6 +52,7 @@ stages:
     displayName: Terraform Resource Creation
 
     steps:
+
     - checkout: self
 
     # -----------------------------------------------------
@@ -67,6 +83,17 @@ stages:
 
     # -----------------------------------------------------
     # Terraform Apply
+    #
+    # NEWLY UPDATED:
+    # Added dynamic Azure DevOps Build ID
+    #
+    # This Build ID is passed into Terraform
+    # and stored as Azure Resource Tags.
+    #
+    # Used later by:
+    # - Resource inventory report
+    # - Excel report generation
+    # - New vs Existing resource tracking
     # -----------------------------------------------------
     - task: AzureCLI@2
       displayName: Terraform Apply
@@ -80,7 +107,8 @@ stages:
           cd terraform
 
           terraform apply -auto-approve \
-            -var-file="$(tfvarsFile)"
+            -var-file="$(tfvarsFile)" \
+            -var="build_id=$(Build.BuildId)"
 
     # -----------------------------------------------------
     # Export Terraform Outputs
@@ -136,13 +164,16 @@ stages:
 # =========================================================
 - stage: BuildArtifact
   displayName: Archive and Publish Artifact
+
   dependsOn: CreateResources
+
   condition: succeeded()
 
   jobs:
   - job: BuildAndPublish
 
     steps:
+
     - checkout: self
 
     - task: ArchiveFiles@2
@@ -182,6 +213,7 @@ stages:
   - job: BuildAndPush
 
     steps:
+
     - checkout: self
 
     - task: AzureCLI@2
@@ -211,7 +243,9 @@ stages:
 # =========================================================
 - stage: ManualApproval
   displayName: Manual Approval
+
   dependsOn: BuildAndPushImage
+
   condition: succeeded()
 
   jobs:
@@ -220,6 +254,7 @@ stages:
     pool: server
 
     steps:
+
     - task: ManualValidation@0
       timeoutInMinutes: 1440
       inputs:
@@ -246,6 +281,7 @@ stages:
 
   jobs:
   - deployment: DeployApplication
+
     environment: '${{ parameters.environment }}'
 
     strategy:
@@ -296,6 +332,7 @@ stages:
 
   jobs:
   - deployment: DeployToAKS
+
     environment: '${{ parameters.environment }}'
 
     strategy:
@@ -361,6 +398,20 @@ stages:
 
     - checkout: self
 
+    # -----------------------------------------------------
+    # Fetch Azure Resources
+    #
+    # NEWLY UPDATED:
+    #
+    # Added:
+    # - buildId tag extraction
+    # - lowercase env tag support
+    #
+    # Used later by:
+    # - Python reporting script
+    # - Excel report generation
+    # - New vs Existing resource identification
+    # -----------------------------------------------------
     - task: AzureCLI@2
       displayName: Fetch Azure Resources
       inputs:
@@ -381,7 +432,8 @@ stages:
               name:name,
               type:type,
               location:location,
-              env:tags.ENV
+              env:tags.env,
+              buildId:tags.buildId
             }" \
             -o json > output/resources.json
 
@@ -390,11 +442,35 @@ stages:
             --query "[].name" \
             -o json > output/new_resources.json
 
+    # -----------------------------------------------------
+    # Install Python
+    # -----------------------------------------------------
     - task: UsePythonVersion@0
       displayName: Install Python
       inputs:
         versionSpec: '3.x'
 
+    # -----------------------------------------------------
+    # Debug Files
+    #
+    # NEWLY ADDED
+    #
+    # Used for troubleshooting:
+    # - Missing files
+    # - Path issues
+    # - Python execution problems
+    # -----------------------------------------------------
+    - script: |
+        echo "Current Directory:"
+        pwd
+
+        echo "Files Generated:"
+        find .
+      displayName: Debug Files
+
+    # -----------------------------------------------------
+    # Generate Excel Report
+    # -----------------------------------------------------
     - script: |
         set -euo pipefail
 
@@ -405,6 +481,9 @@ stages:
         python scripts/generate_resource_report.py
       displayName: Generate Excel Report
 
+    # -----------------------------------------------------
+    # Publish Resource Report Artifact
+    # -----------------------------------------------------
     - task: PublishBuildArtifacts@1
       displayName: Publish Resource Report
       inputs:

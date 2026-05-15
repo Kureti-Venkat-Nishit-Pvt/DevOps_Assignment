@@ -5,7 +5,28 @@ resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
   location = var.location
 
-  # Common tags shared across all Azure resources.
-  # Values are supplied through environment-specific tfvars files.
-  tags = var.tags
+  # =========================================================
+  # NEWLY UPDATED
+  #
+  # Merges:
+  # - Static environment tags from tfvars
+  # - Dynamic Azure DevOps Pipeline Build ID
+  #
+  # This enables:
+  # - Resource inventory tracking
+  # - Excel report highlighting
+  # - New vs Existing resource detection
+  #
+  # Example final Azure tags:
+  #
+  # env               = dev
+  # CreatedByPipeline = true
+  # buildId           = 20260515
+  # =========================================================
+  tags = merge(
+    var.tags,
+    {
+      buildId = var.build_id
+    }
+  )
 }

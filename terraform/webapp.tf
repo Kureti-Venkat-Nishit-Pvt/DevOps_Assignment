@@ -33,6 +33,20 @@ resource "azurerm_linux_web_app" "webapp" {
 
   https_only = true
 
-  # Shared environment tags applied to Web App.
-  tags = var.tags
+  # =========================================================
+  # NEWLY UPDATED
+  #
+  # Added dynamic Azure DevOps Pipeline Build ID tag.
+  #
+  # Used by:
+  # - Resource inventory report
+  # - Excel report highlighting
+  # - Tracking pipeline-created resources
+  # =========================================================
+  tags = merge(
+    var.tags,
+    {
+      buildId = var.build_id
+    }
+  )
 }

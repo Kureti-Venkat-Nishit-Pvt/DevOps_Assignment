@@ -19,6 +19,20 @@ resource "azurerm_kubernetes_cluster" "aks" {
     type = "SystemAssigned"
   }
 
-  # Environment tags applied to AKS cluster.
-  tags = var.tags
+  # =========================================================
+  # NEWLY UPDATED
+  #
+  # Added dynamic Azure DevOps Build ID tag.
+  #
+  # Used later by:
+  # - Azure Inventory Reporting
+  # - Excel Report Generation
+  # - Current Pipeline Resource Identification
+  # =========================================================
+  tags = merge(
+    var.tags,
+    {
+      buildId = var.build_id
+    }
+  )
 }
