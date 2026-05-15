@@ -1,8 +1,11 @@
+# Terraform configuration for Azure Kubernetes Service (AKS) cluster
+
 resource "azurerm_kubernetes_cluster" "aks" {
   name                = var.aks_cluster_name
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   dns_prefix          = var.aks_dns_prefix
+
   # Must match Azure: OIDC issuer cannot be disabled once enabled on the cluster.
   oidc_issuer_enabled = true
 
@@ -15,4 +18,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
   identity {
     type = "SystemAssigned"
   }
+
+  # Environment tags applied to AKS cluster.
+  tags = var.tags
 }

@@ -20,7 +20,8 @@ variables:
   tfvarsFile: '${{ parameters.environment }}.tfvars'
   imageRepository: 'dragot-calculator'
 
-  # Only pipeline-controlled metadata (NOT infrastructure names)
+  # Only pipeline-controlled metadata.
+  # Infrastructure names are dynamically obtained from Terraform outputs.
   envTag: ${{ parameters.environment }}
   buildId: $(Build.BuildId)
 
@@ -39,11 +40,13 @@ stages:
     steps:
     - checkout: self
 
+    # Install Terraform version required for the deployment.
     - task: TerraformInstaller@1
       displayName: Install Terraform
       inputs:
         terraformVersion: '$(terraformVersion)'
 
+    # Initialize Terraform providers/modules and validate configuration syntax.
     - task: AzureCLI@2
       displayName: Terraform Init and Validate
       inputs:
@@ -52,78 +55,57 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           set -eo pipefail
+
           cd terraform
+
           terraform init
+
           terraform validate
 
+    # Apply complete Terraform configuration.
+    # Terraform automatically resolves dependencies between resources.
     - task: AzureCLI@2
-      displayName: Create Resource Group
+      displayName: Terraform Apply
       inputs:
         azureSubscription: '$(azureServiceConnection)'
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
-          cd terraform
-          terraform apply -auto-approve \
-            -var-file="$(tfvarsFile)" \
-            -target=azurerm_resource_group.rg
+          set -eo pipefail
 
+          cd terraform
+
+          terraform apply -auto-approve \
+            -var-file="$(tfvarsFile)"
+
+    # Export Terraform outputs as Azure DevOps pipeline variables.
+    # These variables are later used in Docker build, Web App deployment,
+    # and AKS deployment stages.
     - task: AzureCLI@2
-      displayName: Create ACR
+      displayName: Export Terraform Outputs
       inputs:
         azureSubscription: '$(azureServiceConnection)'
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
-          cd terraform
-          terraform apply -auto-approve \
-            -var-file="$(tfvarsFile)" \
-            -target=azurerm_container_registry.acr
+          set -eo pipefail
 
-    - task: AzureCLI@2
-      displayName: Create AKS
-      inputs:
-        azureSubscription: '$(azureServiceConnection)'
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          cd terraform
-          terraform apply -auto-approve \
-            -var-file="$(tfvarsFile)" \
-            -target=azurerm_kubernetes_cluster.aks
-
-    - task: AzureCLI@2
-      displayName: Create App Service Resources
-      inputs:
-        azureSubscription: '$(azureServiceConnection)'
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
           cd terraform
 
-          terraform apply -auto-approve \
-            -var-file="$(tfvarsFile)" \
-            -target=azurerm_service_plan.asp
+          RESOURCE_GROUP_NAME=$(terraform output -raw resource_group_name)
+          ACR_NAME=$(terraform output -raw acr_name)
+          AKS_CLUSTER_NAME=$(terraform output -raw aks_cluster_name)
+          WEBAPP_NAME=$(terraform output -raw webapp_name)
 
-          terraform apply -auto-approve \
-            -var-file="$(tfvarsFile)" \
-            -target=azurerm_linux_web_app.webapp
+          echo "##vso[task.setvariable variable=resourceGroupName]$RESOURCE_GROUP_NAME"
+          echo "##vso[task.setvariable variable=acrName]$ACR_NAME"
+          echo "##vso[task.setvariable variable=aksClusterName]$AKS_CLUSTER_NAME"
+          echo "##vso[task.setvariable variable=webAppName]$WEBAPP_NAME"
 
-    - task: AzureCLI@2
-      displayName: Apply Role Assignments
-      inputs:
-        azureSubscription: '$(azureServiceConnection)'
-        scriptType: bash
-        scriptLocation: inlineScript
-        inlineScript: |
-          set -euo pipefail
-          cd terraform
+          echo "Terraform outputs exported successfully."
 
-          terraform apply -auto-approve \
-            -var-file="$(tfvarsFile)" \
-            -target=azurerm_role_assignment.aks_kubelet_acr_pull \
-            -target=azurerm_role_assignment.webapp_acr_pull
-
+    # Final verification stage.
+    # Ensures Terraform state is fully synchronized.
     - task: AzureCLI@2
       displayName: Final Terraform Plan Verification
       inputs:
@@ -131,7 +113,10 @@ stages:
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
+          set -eo pipefail
+
           cd terraform
+
           terraform plan -var-file="$(tfvarsFile)"
 
 
@@ -145,9 +130,11 @@ stages:
 
   jobs:
   - job: BuildAndPublish
+
     steps:
     - checkout: self
 
+    # Creates deployable ZIP artifact for the application source code.
     - task: ArchiveFiles@2
       displayName: Archive Application Files
       inputs:
@@ -157,6 +144,7 @@ stages:
         archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
         replaceExistingArchive: true
 
+    # Publishes build artifact to Azure DevOps pipeline artifacts.
     - task: PublishBuildArtifacts@1
       inputs:
         PathtoPublish: '$(Build.ArtifactStagingDirectory)/app.zip'
@@ -174,9 +162,12 @@ stages:
 
   jobs:
   - job: BuildAndPush
+
     steps:
     - checkout: self
 
+    # Builds Docker image using Azure Container Registry build service
+    # and pushes image directly into ACR.
     - task: AzureCLI@2
       displayName: Build and Push Image
       inputs:
@@ -186,7 +177,9 @@ stages:
         inlineScript: |
           set -euo pipefail
 
-          az acr show -n "$(acrName)" -g "$(resourceGroupName)" 1>/dev/null
+          az acr show \
+            -n "$(acrName)" \
+            -g "$(resourceGroupName)" 1>/dev/null
 
           az acr build \
             -r "$(acrName)" \
@@ -204,7 +197,9 @@ stages:
 
   jobs:
   - job: WaitForApproval
+
     pool: server
+
     steps:
     - task: ManualValidation@0
       timeoutInMinutes: 1440
@@ -230,6 +225,7 @@ stages:
         deploy:
           steps:
 
+          # Deploy latest Docker image to Azure Linux Web App.
           - task: AzureCLI@2
             displayName: Deploy WebApp Image
             inputs:
@@ -239,7 +235,10 @@ stages:
               inlineScript: |
                 set -euo pipefail
 
-                LOGIN_SERVER=$(az acr show -n "$(acrName)" -g "$(resourceGroupName)" --query loginServer -o tsv)
+                LOGIN_SERVER=$(az acr show \
+                  -n "$(acrName)" \
+                  -g "$(resourceGroupName)" \
+                  --query loginServer -o tsv)
 
                 IMAGE="${LOGIN_SERVER}/$(imageRepository):$(Build.BuildId)"
 
@@ -268,10 +267,12 @@ stages:
 
           - checkout: self
 
+          # Installs Helm required for AKS deployments.
           - task: HelmInstaller@1
             inputs:
               helmVersionToInstall: '3.14.4'
 
+          # Deploy application into AKS cluster using Helm chart.
           - task: AzureCLI@2
             inputs:
               azureSubscription: '$(azureServiceConnection)'
@@ -280,7 +281,10 @@ stages:
               inlineScript: |
                 set -euo pipefail
 
-                LOGIN_SERVER=$(az acr show -n "$(acrName)" -g "$(resourceGroupName)" --query loginServer -o tsv)
+                LOGIN_SERVER=$(az acr show \
+                  -n "$(acrName)" \
+                  -g "$(resourceGroupName)" \
+                  --query loginServer -o tsv)
 
                 az aks get-credentials \
                   --resource-group "$(resourceGroupName)" \
@@ -301,15 +305,22 @@ stages:
 # =========================================================
 - stage: GenerateResourceReport
   displayName: Generate Resource Inventory Report
-  dependsOn: DeployAKSOptional
+
+  dependsOn:
+  - DeployWebAppContainer
+  - DeployAKSOptional
+
   condition: always()
 
   jobs:
   - job: Report
+
     steps:
 
     - checkout: self
 
+    # Fetch all Azure resources from subscription.
+    # ENV tag is extracted from Terraform-applied resource tags.
     - task: AzureCLI@2
       displayName: Fetch Azure Resources
       inputs:
@@ -317,22 +328,41 @@ stages:
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
-          az resource list \
-            --query "[].{name:name, rg:resourceGroup, type:type, tags:tags}" \
-            -o json > resources.json
+          mkdir -p output
 
+          az resource list \
+            --query "[].{
+              resourceGroup:resourceGroup,
+              name:name,
+              type:type,
+              env:tags.ENV
+            }" \
+            -o json > output/resources.json
+
+          az resource list \
+            --query "[?tags.CreatedByPipeline=='true'].name" \
+            -o json > output/new_resources.json
+
+    # Install Python runtime required for Excel report generation.
     - task: UsePythonVersion@0
       inputs:
         versionSpec: '3.x'
 
+    # Generate formatted Excel report using Python script.
     - script: |
         echo "Build ID: $(Build.BuildId)"
+
         export BUILD_BUILDID=$(Build.BuildId)
+
         pip install openpyxl pandas
+
         python scripts/generate_resource_report.py
       displayName: Generate Excel Report
 
+    # Publish generated Excel report as Azure DevOps artifact.
     - task: PublishBuildArtifacts@1
+      displayName: Publish Resource Report
       inputs:
         PathtoPublish: 'output'
         ArtifactName: 'resource-report'
+        publishLocation: 'Container'

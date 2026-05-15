@@ -15,3 +15,8 @@ aks_cluster_name = "aks-cal-ind-prod-06"
 aks_dns_prefix = "aks-cal-ind-prod-06"
 
 container_image_repository = "dragot-calculator"
+
+tags = {
+  ENV = "prod"
+  CreatedByPipeline = "true"
+}
