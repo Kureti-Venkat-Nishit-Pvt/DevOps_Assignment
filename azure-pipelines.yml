@@ -20,8 +20,7 @@ variables:
   tfvarsFile: '${{ parameters.environment }}.tfvars'
   imageRepository: 'dragot-calculator'
 
-  # Only pipeline-controlled metadata.
-  # Infrastructure names are dynamically obtained from Terraform outputs.
+  # Pipeline metadata
   envTag: ${{ parameters.environment }}
   buildId: $(Build.BuildId)
 
@@ -40,13 +39,17 @@ stages:
     steps:
     - checkout: self
 
-    # Install Terraform version required for the deployment.
+    # -----------------------------------------------------
+    # Install Terraform
+    # -----------------------------------------------------
     - task: TerraformInstaller@1
       displayName: Install Terraform
       inputs:
         terraformVersion: '$(terraformVersion)'
 
-    # Initialize Terraform providers/modules and validate configuration syntax.
+    # -----------------------------------------------------
+    # Terraform Init + Validate
+    # -----------------------------------------------------
     - task: AzureCLI@2
       displayName: Terraform Init and Validate
       inputs:
@@ -62,8 +65,9 @@ stages:
 
           terraform validate
 
-    # Apply complete Terraform configuration.
-    # Terraform automatically resolves dependencies between resources.
+    # -----------------------------------------------------
+    # Terraform Apply
+    # -----------------------------------------------------
     - task: AzureCLI@2
       displayName: Terraform Apply
       inputs:
@@ -78,10 +82,11 @@ stages:
           terraform apply -auto-approve \
             -var-file="$(tfvarsFile)"
 
-    # Export Terraform outputs as Azure DevOps pipeline variables.
-    # These variables are later used in Docker build, Web App deployment,
-    # and AKS deployment stages.
+    # -----------------------------------------------------
+    # Export Terraform Outputs
+    # -----------------------------------------------------
     - task: AzureCLI@2
+      name: terraformOutputs
       displayName: Export Terraform Outputs
       inputs:
         azureSubscription: '$(azureServiceConnection)'
@@ -97,15 +102,21 @@ stages:
           AKS_CLUSTER_NAME=$(terraform output -raw aks_cluster_name)
           WEBAPP_NAME=$(terraform output -raw webapp_name)
 
-          echo "##vso[task.setvariable variable=resourceGroupName]$RESOURCE_GROUP_NAME"
-          echo "##vso[task.setvariable variable=acrName]$ACR_NAME"
-          echo "##vso[task.setvariable variable=aksClusterName]$AKS_CLUSTER_NAME"
-          echo "##vso[task.setvariable variable=webAppName]$WEBAPP_NAME"
+          echo "Resource Group: $RESOURCE_GROUP_NAME"
+          echo "ACR Name: $ACR_NAME"
+          echo "AKS Cluster: $AKS_CLUSTER_NAME"
+          echo "Web App: $WEBAPP_NAME"
+
+          echo "##vso[task.setvariable variable=resourceGroupName;isOutput=true]$RESOURCE_GROUP_NAME"
+          echo "##vso[task.setvariable variable=acrName;isOutput=true]$ACR_NAME"
+          echo "##vso[task.setvariable variable=aksClusterName;isOutput=true]$AKS_CLUSTER_NAME"
+          echo "##vso[task.setvariable variable=webAppName;isOutput=true]$WEBAPP_NAME"
 
           echo "Terraform outputs exported successfully."
 
-    # Final verification stage.
-    # Ensures Terraform state is fully synchronized.
+    # -----------------------------------------------------
+    # Final Verification
+    # -----------------------------------------------------
     - task: AzureCLI@2
       displayName: Final Terraform Plan Verification
       inputs:
@@ -134,7 +145,6 @@ stages:
     steps:
     - checkout: self
 
-    # Creates deployable ZIP artifact for the application source code.
     - task: ArchiveFiles@2
       displayName: Archive Application Files
       inputs:
@@ -144,8 +154,8 @@ stages:
         archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
         replaceExistingArchive: true
 
-    # Publishes build artifact to Azure DevOps pipeline artifacts.
     - task: PublishBuildArtifacts@1
+      displayName: Publish Application Artifact
       inputs:
         PathtoPublish: '$(Build.ArtifactStagingDirectory)/app.zip'
         ArtifactName: 'drop'
@@ -157,8 +167,16 @@ stages:
 # =========================================================
 - stage: BuildAndPushImage
   displayName: Build and Push Docker Image
-  dependsOn: BuildArtifact
+
+  dependsOn:
+  - CreateResources
+  - BuildArtifact
+
   condition: succeeded()
+
+  variables:
+    acrName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.acrName'] ]
+    resourceGroupName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.resourceGroupName'] ]
 
   jobs:
   - job: BuildAndPush
@@ -166,8 +184,6 @@ stages:
     steps:
     - checkout: self
 
-    # Builds Docker image using Azure Container Registry build service
-    # and pushes image directly into ACR.
     - task: AzureCLI@2
       displayName: Build and Push Image
       inputs:
@@ -176,6 +192,9 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           set -euo pipefail
+
+          echo "acrName=$(acrName)"
+          echo "resourceGroupName=$(resourceGroupName)"
 
           az acr show \
             -n "$(acrName)" \
@@ -205,7 +224,7 @@ stages:
       timeoutInMinutes: 1440
       inputs:
         instructions: 'Approve to continue deployment.'
-        onTimeout: 'reject'
+        onTimeout: reject
 
 
 # =========================================================
@@ -213,8 +232,17 @@ stages:
 # =========================================================
 - stage: DeployWebAppContainer
   displayName: Deploy WebApp Container
-  dependsOn: ManualApproval
+
+  dependsOn:
+  - CreateResources
+  - ManualApproval
+
   condition: succeeded()
+
+  variables:
+    acrName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.acrName'] ]
+    resourceGroupName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.resourceGroupName'] ]
+    webAppName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.webAppName'] ]
 
   jobs:
   - deployment: DeployApplication
@@ -225,7 +253,6 @@ stages:
         deploy:
           steps:
 
-          # Deploy latest Docker image to Azure Linux Web App.
           - task: AzureCLI@2
             displayName: Deploy WebApp Image
             inputs:
@@ -242,6 +269,8 @@ stages:
 
                 IMAGE="${LOGIN_SERVER}/$(imageRepository):$(Build.BuildId)"
 
+                echo "Deploying Image: $IMAGE"
+
                 az webapp config container set \
                   --resource-group "$(resourceGroupName)" \
                   --name "$(webAppName)" \
@@ -253,8 +282,17 @@ stages:
 # =========================================================
 - stage: DeployAKSOptional
   displayName: Deploy to AKS
-  dependsOn: ManualApproval
+
+  dependsOn:
+  - CreateResources
+  - ManualApproval
+
   condition: and(succeeded(), eq(variables['deployToAks'], 'true'))
+
+  variables:
+    acrName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.acrName'] ]
+    resourceGroupName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.resourceGroupName'] ]
+    aksClusterName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.aksClusterName'] ]
 
   jobs:
   - deployment: DeployToAKS
@@ -267,13 +305,13 @@ stages:
 
           - checkout: self
 
-          # Installs Helm required for AKS deployments.
           - task: HelmInstaller@1
+            displayName: Install Helm
             inputs:
               helmVersionToInstall: '3.14.4'
 
-          # Deploy application into AKS cluster using Helm chart.
           - task: AzureCLI@2
+            displayName: Deploy to AKS
             inputs:
               azureSubscription: '$(azureServiceConnection)'
               scriptType: bash
@@ -301,16 +339,20 @@ stages:
 
 
 # =========================================================
-# 📊 RESOURCE REPORT GENERATION
+# RESOURCE REPORT GENERATION
 # =========================================================
 - stage: GenerateResourceReport
   displayName: Generate Resource Inventory Report
 
   dependsOn:
+  - CreateResources
   - DeployWebAppContainer
   - DeployAKSOptional
 
   condition: always()
+
+  variables:
+    resourceGroupName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.resourceGroupName'] ]
 
   jobs:
   - job: Report
@@ -319,8 +361,6 @@ stages:
 
     - checkout: self
 
-    # Fetch all Azure resources from subscription.
-    # ENV tag is extracted from Terraform-applied resource tags.
     - task: AzureCLI@2
       displayName: Fetch Azure Resources
       inputs:
@@ -328,29 +368,35 @@ stages:
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
+          set -euo pipefail
+
           mkdir -p output
 
+          echo "Fetching resources from $(resourceGroupName)"
+
           az resource list \
+            --resource-group "$(resourceGroupName)" \
             --query "[].{
               resourceGroup:resourceGroup,
               name:name,
               type:type,
+              location:location,
               env:tags.ENV
             }" \
             -o json > output/resources.json
 
           az resource list \
-            --query "[?tags.CreatedByPipeline=='true'].name" \
+            --resource-group "$(resourceGroupName)" \
+            --query "[].name" \
             -o json > output/new_resources.json
 
-    # Install Python runtime required for Excel report generation.
     - task: UsePythonVersion@0
+      displayName: Install Python
       inputs:
         versionSpec: '3.x'
 
-    # Generate formatted Excel report using Python script.
     - script: |
-        echo "Build ID: $(Build.BuildId)"
+        set -euo pipefail
 
         export BUILD_BUILDID=$(Build.BuildId)
 
@@ -359,7 +405,6 @@ stages:
         python scripts/generate_resource_report.py
       displayName: Generate Excel Report
 
-    # Publish generated Excel report as Azure DevOps artifact.
     - task: PublishBuildArtifacts@1
       displayName: Publish Resource Report
       inputs:
