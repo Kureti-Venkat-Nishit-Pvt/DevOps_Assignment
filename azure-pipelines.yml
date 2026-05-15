@@ -388,9 +388,6 @@ stages:
 
   condition: always()
 
-  variables:
-    resourceGroupName: $[ stageDependencies.CreateResources.TerraformDeployment.outputs['terraformOutputs.resourceGroupName'] ]
-
   jobs:
   - job: Report
 
@@ -399,21 +396,10 @@ stages:
     - checkout: self
 
     # -----------------------------------------------------
-    # Fetch Azure Resources
-    #
-    # NEWLY UPDATED:
-    #
-    # Added:
-    # - buildId tag extraction
-    # - lowercase env tag support
-    #
-    # Used later by:
-    # - Python reporting script
-    # - Excel report generation
-    # - New vs Existing resource identification
+    # FETCH ALL AZURE RESOURCES
     # -----------------------------------------------------
     - task: AzureCLI@2
-      displayName: Fetch Azure Resources
+      displayName: Fetch All Azure Resources
       inputs:
         azureSubscription: '$(azureServiceConnection)'
         scriptType: bash
@@ -423,27 +409,24 @@ stages:
 
           mkdir -p output
 
-          echo "Fetching resources from $(resourceGroupName)"
+          echo "Fetching ALL Azure resources from subscription..."
 
           az resource list \
-            --resource-group "$(resourceGroupName)" \
             --query "[].{
               resourceGroup:resourceGroup,
               name:name,
               type:type,
-              location:location,
-              env:tags.env,
+              env:tags.ENV,
               buildId:tags.buildId
             }" \
             -o json > output/resources.json
 
-          az resource list \
-            --resource-group "$(resourceGroupName)" \
-            --query "[].name" \
-            -o json > output/new_resources.json
+          echo "Azure resource inventory generated."
+
+          cat output/resources.json
 
     # -----------------------------------------------------
-    # Install Python
+    # INSTALL PYTHON
     # -----------------------------------------------------
     - task: UsePythonVersion@0
       displayName: Install Python
@@ -451,38 +434,20 @@ stages:
         versionSpec: '3.x'
 
     # -----------------------------------------------------
-    # Debug Files
-    #
-    # NEWLY ADDED
-    #
-    # Used for troubleshooting:
-    # - Missing files
-    # - Path issues
-    # - Python execution problems
-    # -----------------------------------------------------
-    - script: |
-        echo "Current Directory:"
-        pwd
-
-        echo "Files Generated:"
-        find .
-      displayName: Debug Files
-
-    # -----------------------------------------------------
-    # Generate Excel Report
+    # GENERATE EXCEL REPORT
     # -----------------------------------------------------
     - script: |
         set -euo pipefail
 
         export BUILD_BUILDID=$(Build.BuildId)
 
-        pip install openpyxl pandas
+        pip install openpyxl
 
         python scripts/generate_resource_report.py
       displayName: Generate Excel Report
 
     # -----------------------------------------------------
-    # Publish Resource Report Artifact
+    # PUBLISH REPORT
     # -----------------------------------------------------
     - task: PublishBuildArtifacts@1
       displayName: Publish Resource Report
@@ -490,3 +455,4 @@ stages:
         PathtoPublish: 'output'
         ArtifactName: 'resource-report'
         publishLocation: 'Container'
+        

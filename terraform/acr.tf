@@ -7,25 +7,11 @@ resource "azurerm_container_registry" "acr" {
   sku                 = "Basic"
   admin_enabled       = false
 
-  # =========================================================
-  # NEWLY UPDATED
-  #
-  # Added dynamic Azure DevOps Build ID tag.
-  #
-  # The Build ID is passed dynamically from:
-  # azure-pipelines.yml
-  #
-  # terraform apply -var="build_id=$(Build.BuildId)"
-  #
-  # This is used for:
-  # - Resource inventory tracking
-  # - Excel report generation
-  # - Identifying New vs Existing resources
-  # =========================================================
   tags = merge(
     var.tags,
     {
-      buildId = var.build_id
+      ENV      = var.tags["ENV"]
+      buildId  = var.build_id
     }
   )
 }

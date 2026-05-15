@@ -17,6 +17,6 @@ aks_dns_prefix = "aks-cal-ind-dev-06"
 container_image_repository = "dragot-calculator"
 
 tags = {
-  ENV = "dev"
+  ENV              = "dev"
   CreatedByPipeline = "true"
 }

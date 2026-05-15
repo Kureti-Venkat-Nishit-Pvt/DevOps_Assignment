@@ -16,18 +16,7 @@ aks_dns_prefix = "aks-cal-ind-prod-06"
 
 container_image_repository = "dragot-calculator"
 
-# =========================================================
-# Common tags applied to all Azure resources
-#
-# NEWLY UPDATED:
-# ENV key converted to lowercase "env"
-#
-# Required for:
-# - Azure Resource Inventory Reporting
-# - Excel Report Generation
-# - Pipeline Resource Tracking
-# =========================================================
 tags = {
-  env               = "prod"
+  ENV               = "prod"
   CreatedByPipeline = "true"
 }

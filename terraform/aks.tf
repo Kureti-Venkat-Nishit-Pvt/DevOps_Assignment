@@ -6,7 +6,6 @@ resource "azurerm_kubernetes_cluster" "aks" {
   resource_group_name = azurerm_resource_group.rg.name
   dns_prefix          = var.aks_dns_prefix
 
-  # Must match Azure: OIDC issuer cannot be disabled once enabled on the cluster.
   oidc_issuer_enabled = true
 
   default_node_pool {
@@ -19,20 +18,11 @@ resource "azurerm_kubernetes_cluster" "aks" {
     type = "SystemAssigned"
   }
 
-  # =========================================================
-  # NEWLY UPDATED
-  #
-  # Added dynamic Azure DevOps Build ID tag.
-  #
-  # Used later by:
-  # - Azure Inventory Reporting
-  # - Excel Report Generation
-  # - Current Pipeline Resource Identification
-  # =========================================================
   tags = merge(
     var.tags,
     {
-      buildId = var.build_id
+      ENV      = var.tags["ENV"]
+      buildId  = var.build_id
     }
   )
 }
