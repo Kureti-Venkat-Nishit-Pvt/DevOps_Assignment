@@ -1,12 +1,11 @@
 trigger:
-- Mark_5
+- Mark_6
 
 parameters:
 - name: environment
   displayName: Environment
   type: string
   default: dev
-
   values:
   - dev
   - prod
@@ -21,24 +20,15 @@ variables:
   tfvarsFile: '${{ parameters.environment }}.tfvars'
   imageRepository: 'dragot-calculator'
 
-  ${{ if eq(parameters.environment, 'dev') }}:
-    resourceGroupName: 'RG_cal_ind_dev_05'
-    webAppName: 'webcalinddev05'
-    acrName: 'acrcalinddev05'
-    aksClusterName: 'aks-cal-ind-dev-05'
-
-  ${{ if eq(parameters.environment, 'prod') }}:
-    resourceGroupName: 'RG_cal_ind_prod_05'
-    webAppName: 'webcalindprod05'
-    acrName: 'acrcalindprod05'
-    aksClusterName: 'aks-cal-ind-prod-05'
+  # Only pipeline-controlled metadata (NOT infrastructure names)
+  envTag: ${{ parameters.environment }}
+  buildId: $(Build.BuildId)
 
 stages:
 
 # =========================================================
 # CREATE AZURE RESOURCES
 # =========================================================
-
 - stage: CreateResources
   displayName: Create Azure Resources
 
@@ -47,7 +37,6 @@ stages:
     displayName: Terraform Resource Creation
 
     steps:
-
     - checkout: self
 
     - task: TerraformInstaller@1
@@ -63,9 +52,7 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           set -eo pipefail
-
           cd terraform
-
           terraform init
           terraform validate
 
@@ -77,7 +64,6 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           cd terraform
-
           terraform apply -auto-approve \
             -var-file="$(tfvarsFile)" \
             -target=azurerm_resource_group.rg
@@ -90,7 +76,6 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           cd terraform
-
           terraform apply -auto-approve \
             -var-file="$(tfvarsFile)" \
             -target=azurerm_container_registry.acr
@@ -103,7 +88,6 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           cd terraform
-
           terraform apply -auto-approve \
             -var-file="$(tfvarsFile)" \
             -target=azurerm_kubernetes_cluster.aks
@@ -126,14 +110,13 @@ stages:
             -target=azurerm_linux_web_app.webapp
 
     - task: AzureCLI@2
-      displayName: Apply ACR Pull Role Assignments
+      displayName: Apply Role Assignments
       inputs:
         azureSubscription: '$(azureServiceConnection)'
         scriptType: bash
         scriptLocation: inlineScript
         inlineScript: |
           set -euo pipefail
-
           cd terraform
 
           terraform apply -auto-approve \
@@ -149,14 +132,12 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           cd terraform
+          terraform plan -var-file="$(tfvarsFile)"
 
-          terraform plan \
-            -var-file="$(tfvarsFile)"
 
 # =========================================================
-# BUILD APPLICATION ARTIFACT
+# BUILD ARTIFACT
 # =========================================================
-
 - stage: BuildArtifact
   displayName: Archive and Publish Artifact
   dependsOn: CreateResources
@@ -164,10 +145,7 @@ stages:
 
   jobs:
   - job: BuildAndPublish
-    displayName: Build And Publish
-
     steps:
-
     - checkout: self
 
     - task: ArchiveFiles@2
@@ -180,16 +158,15 @@ stages:
         replaceExistingArchive: true
 
     - task: PublishBuildArtifacts@1
-      displayName: Publish Application Artifact
       inputs:
         PathtoPublish: '$(Build.ArtifactStagingDirectory)/app.zip'
         ArtifactName: 'drop'
         publishLocation: 'Container'
 
-# =========================================================
-# BUILD AND PUSH DOCKER IMAGE
-# =========================================================
 
+# =========================================================
+# DOCKER BUILD & PUSH
+# =========================================================
 - stage: BuildAndPushImage
   displayName: Build and Push Docker Image
   dependsOn: BuildArtifact
@@ -197,14 +174,11 @@ stages:
 
   jobs:
   - job: BuildAndPush
-    displayName: Build And Push Image
-
     steps:
-
     - checkout: self
 
     - task: AzureCLI@2
-      displayName: Build and Push Image to ACR
+      displayName: Build and Push Image
       inputs:
         azureSubscription: '$(azureServiceConnection)'
         scriptType: bash
@@ -212,20 +186,17 @@ stages:
         inlineScript: |
           set -euo pipefail
 
-          az acr show \
-            -n "$(acrName)" \
-            -g "$(resourceGroupName)" 1>/dev/null
-
-          cd "$(Build.SourcesDirectory)"
+          az acr show -n "$(acrName)" -g "$(resourceGroupName)" 1>/dev/null
 
           az acr build \
             -r "$(acrName)" \
-            -t "$(imageRepository):$(Build.BuildId)" .
+            -t "$(imageRepository):$(Build.BuildId)" \
+            .
+
 
 # =========================================================
 # MANUAL APPROVAL
 # =========================================================
-
 - stage: ManualApproval
   displayName: Manual Approval
   dependsOn: BuildAndPushImage
@@ -233,40 +204,34 @@ stages:
 
   jobs:
   - job: WaitForApproval
-    displayName: Wait For Manual Validation
     pool: server
-
     steps:
     - task: ManualValidation@0
       timeoutInMinutes: 1440
       inputs:
-        notifyUsers: ''
         instructions: 'Approve to continue deployment.'
         onTimeout: 'reject'
 
-# =========================================================
-# DEPLOY WEBAPP CONTAINER
-# =========================================================
 
+# =========================================================
+# DEPLOY WEB APP
+# =========================================================
 - stage: DeployWebAppContainer
-  displayName: Deploy Container to Web App
+  displayName: Deploy WebApp Container
   dependsOn: ManualApproval
   condition: succeeded()
 
   jobs:
   - deployment: DeployApplication
-    displayName: Deploy Container Image To WebApp
-
     environment: '${{ parameters.environment }}'
 
     strategy:
       runOnce:
         deploy:
-
           steps:
 
           - task: AzureCLI@2
-            displayName: Point WebApp to ACR Image
+            displayName: Deploy WebApp Image
             inputs:
               azureSubscription: '$(azureServiceConnection)'
               scriptType: bash
@@ -274,60 +239,40 @@ stages:
               inlineScript: |
                 set -euo pipefail
 
-                LOGIN_SERVER=$(az acr show \
-                  -n "$(acrName)" \
-                  -g "$(resourceGroupName)" \
-                  --query loginServer \
-                  -o tsv)
+                LOGIN_SERVER=$(az acr show -n "$(acrName)" -g "$(resourceGroupName)" --query loginServer -o tsv)
 
-                IMAGE_NAME="${LOGIN_SERVER}/$(imageRepository):$(Build.BuildId)"
+                IMAGE="${LOGIN_SERVER}/$(imageRepository):$(Build.BuildId)"
 
                 az webapp config container set \
                   --resource-group "$(resourceGroupName)" \
                   --name "$(webAppName)" \
-                  --docker-custom-image-name "${IMAGE_NAME}" \
-                  --docker-registry-server-url "https://${LOGIN_SERVER}"
+                  --docker-custom-image-name "$IMAGE"
 
-                az webapp config set \
-                  --resource-group "$(resourceGroupName)" \
-                  --name "$(webAppName)" \
-                  --generic-configurations '{"acrUseManagedIdentityCreds":true}'
-
-                az webapp config appsettings set \
-                  --resource-group "$(resourceGroupName)" \
-                  --name "$(webAppName)" \
-                  --settings WEBSITES_PORT=8000
 
 # =========================================================
 # OPTIONAL AKS DEPLOYMENT
 # =========================================================
-
 - stage: DeployAKSOptional
-  displayName: Deploy to AKS Optional
+  displayName: Deploy to AKS
   dependsOn: ManualApproval
   condition: and(succeeded(), eq(variables['deployToAks'], 'true'))
 
   jobs:
   - deployment: DeployToAKS
-    displayName: Deploy Image to AKS
-
     environment: '${{ parameters.environment }}'
 
     strategy:
       runOnce:
         deploy:
-
           steps:
 
           - checkout: self
 
           - task: HelmInstaller@1
-            displayName: Install Helm
             inputs:
               helmVersionToInstall: '3.14.4'
 
           - task: AzureCLI@2
-            displayName: Configure kubectl and Helm upgrade
             inputs:
               azureSubscription: '$(azureServiceConnection)'
               scriptType: bash
@@ -335,11 +280,7 @@ stages:
               inlineScript: |
                 set -euo pipefail
 
-                LOGIN_SERVER=$(az acr show \
-                  -n "$(acrName)" \
-                  -g "$(resourceGroupName)" \
-                  --query loginServer \
-                  -o tsv)
+                LOGIN_SERVER=$(az acr show -n "$(acrName)" -g "$(resourceGroupName)" --query loginServer -o tsv)
 
                 az aks get-credentials \
                   --resource-group "$(resourceGroupName)" \
@@ -352,5 +293,46 @@ stages:
                   --create-namespace \
                   --set image.repository="${LOGIN_SERVER}/$(imageRepository)" \
                   --set image.tag="$(Build.BuildId)" \
-                  --wait \
-                  --timeout 10m
+                  --wait
+
+
+# =========================================================
+# 📊 RESOURCE REPORT GENERATION
+# =========================================================
+- stage: GenerateResourceReport
+  displayName: Generate Resource Inventory Report
+  dependsOn: DeployAKSOptional
+  condition: always()
+
+  jobs:
+  - job: Report
+    steps:
+
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: Fetch Azure Resources
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az resource list \
+            --query "[].{name:name, rg:resourceGroup, type:type, tags:tags}" \
+            -o json > resources.json
+
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.x'
+
+    - script: |
+        echo "Build ID: $(Build.BuildId)"
+        export BUILD_BUILDID=$(Build.BuildId)
+        pip install openpyxl pandas
+        python scripts/generate_resource_report.py
+      displayName: Generate Excel Report
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: 'output'
+        ArtifactName: 'resource-report'
